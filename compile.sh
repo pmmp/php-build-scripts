@@ -86,6 +86,11 @@ function download_file {
 	_download_file "$1" 2>> "$DIR/install.log"
 }
 
+function prefix_echo {
+	echo "[$PM_LOG_PREFIX] $1"
+	echo "[$PM_LOG_PREFIX] $1" >> "$DIR/install.log"
+}
+
 #if type llvm-gcc >/dev/null 2>&1; then
 #	export CC="llvm-gcc"
 #	export CXX="llvm-g++"
@@ -365,6 +370,7 @@ export CXXFLAGS="$CFLAGS $CXXFLAGS"
 export LDFLAGS="$LDFLAGS"
 export CPPFLAGS="$CPPFLAGS"
 export LIBRARY_PATH="$DIR/bin/php7/lib:$LIBRARY_PATH"
+export PKG_CONFIG_PATH="$DIR/bin/php7/lib/pkgconfig"
 
 #some stuff (like curl) makes assumptions about library paths that break due to different behaviour in pkgconf vs pkg-config
 export PKG_CONFIG_ALLOW_SYSTEM_LIBS="yes"
@@ -379,12 +385,15 @@ mkdir -m 0755 bin/php7 >> "$DIR/install.log" 2>&1
 cd "$BUILD_DIR"
 set -e
 
-#PHP 7
-echo -n "[PHP] downloading $PHP_VERSION..."
+function download_php {
+	#PHP 7
+	PM_LOG_PREFIX="PHP"
+	prefix_echo "downloading $PHP_VERSION"
 
-download_file "https://github.com/php/php-src/archive/php-$PHP_VERSION.tar.gz" | tar -zx >> "$DIR/install.log" 2>&1
-mv php-src-php-$PHP_VERSION php
-echo " done!"
+	download_file "https://github.com/php/php-src/archive/php-$PHP_VERSION.tar.gz" | tar -zx >> "$DIR/install.log" 2>&1
+	mv php-src-php-$PHP_VERSION php
+	prefix_echo "done!"
+}
 
 function build_readline {
 	if [ "$DO_STATIC" == "yes" ]; then
@@ -426,22 +435,23 @@ function build_zlib {
 	fi
 
 	#zlib
-	echo -n "[zlib] downloading $ZLIB_VERSION..."
+	PM_LOG_PREFIX="zlib"
+	prefix_echo "downloading $ZLIB_VERSION"
 	download_file "https://github.com/madler/zlib/archive/v$ZLIB_VERSION.tar.gz" | tar -zx >> "$DIR/install.log" 2>&1
 	mv zlib-$ZLIB_VERSION zlib
-	echo -n " checking..."
+	prefix_echo " checking..."
 	cd zlib
 	RANLIB=$RANLIB ./configure --prefix="$DIR/bin/php7" \
 	$EXTRA_FLAGS >> "$DIR/install.log" 2>&1
-	echo -n " compiling..."
+	prefix_echo "compiling"
 	make -j $THREADS >> "$DIR/install.log" 2>&1
-	echo -n " installing..."
+	prefix_echo "installing..."
 	make install >> "$DIR/install.log" 2>&1
 	cd ..
 		if [ "$DO_STATIC" != "yes" ]; then
 			rm -f "$DIR/bin/php7/lib/libz.a"
 		fi
-	echo " done!"
+	prefix_echo "done!"
 }
 
 function build_gmp {
@@ -488,7 +498,6 @@ function build_openssl {
 		local EXTRA_FLAGS="shared"
 	fi
 
-	export PKG_CONFIG_PATH="$DIR/bin/php7/lib/pkgconfig"
 	WITH_OPENSSL="--with-openssl=$DIR/bin/php7"
 	echo -n "[OpenSSL] downloading $OPENSSL_VERSION..."
 	download_file "http://www.openssl.org/source/openssl-$OPENSSL_VERSION.tar.gz" | tar -zx >> "$DIR/install.log" 2>&1
@@ -715,10 +724,10 @@ function build_sqlite3 {
 		local EXTRA_FLAGS="--enable-static=no --enable-shared=yes"
 	fi
 	#sqlite3
-	echo -n "[sqlite3] downloading $SQLITE3_VERSION..."
+	echo "[sqlite3] downloading $SQLITE3_VERSION"
 	download_file "https://www.sqlite.org/2020/sqlite-autoconf-$SQLITE3_VERSION.tar.gz" | tar -zx >> "$DIR/install.log" 2>&1
 	mv sqlite-autoconf-$SQLITE3_VERSION sqlite3 >> "$DIR/install.log" 2>&1
-	echo -n " checking"
+	echo "[sqlite3] checking"
 	cd sqlite3
 	LDFLAGS="$LDFLAGS -L${DIR}/bin/php7/lib" CPPFLAGS="$CPPFLAGS -I${DIR}/bin/php7/include" RANLIB=$RANLIB ./configure \
 	--prefix="$DIR/bin/php7" \
@@ -726,12 +735,12 @@ function build_sqlite3 {
 	--enable-static-shell=no \
 	$EXTRA_FLAGS \
 	$CONFIGURE_FLAGS >> "$DIR/install.log" 2>&1
-	echo -n " compiling..."
+	echo "[sqlite3] compiling"
 	make -j $THREADS >> "$DIR/install.log" 2>&1
-	echo -n " installing..."
+	echo "[sqlite3] installing"
 	make install >> "$DIR/install.log" 2>&1
 	cd ..
-	echo " done!"
+	echo "[sqlite3] done!"
 }
 
 if [ "$COMPILE_FANCY" == "yes" ]; then
@@ -740,17 +749,19 @@ else
 	HAVE_READLINE="--without-readline"
 fi
 
-build_zlib
-build_gmp
-build_openssl
-build_curl
-build_yaml
+build_zlib &
+build_yaml &
+build_gmp &
+build_openssl &
+wait
+
+build_curl &
 if [ "$COMPILE_LEVELDB" == "yes" ]; then
-	build_leveldb
+	build_leveldb &
 fi
 if [ "$COMPILE_GD" == "yes" ]; then
-	build_libpng
-	build_libjpeg
+	build_libpng &
+	build_libjpeg &
 	HAS_GD="--with-gd"
 	HAS_LIBPNG="--with-png-dir=${DIR}/bin/php7"
 	HAS_LIBJPEG="--with-jpeg-dir=${DIR}/bin/php7"
@@ -760,10 +771,13 @@ else
 	HAS_LIBJPEG=""
 fi
 
-build_libxml2
-build_libzip
-build_sqlite3
+build_libxml2 &
+build_libzip &
+build_sqlite3 &
 
+download_php &
+
+mkdir -m 0755 "$BUILD_DIR/phpext"
 # PECL libraries
 
 # 1: extension name
@@ -773,7 +787,7 @@ build_sqlite3
 function get_extension_tar_gz {
 	echo -n "  $1: downloading $2..."
 	download_file "$3" | tar -zx >> "$DIR/install.log" 2>&1
-	mv "$4" "$BUILD_DIR/php/ext/$1"
+	mv "$4" "$BUILD_DIR/phpext/$1"
 	echo " done!"
 }
 
@@ -792,10 +806,20 @@ function get_pecl_extension {
 	get_extension_tar_gz "$1" "$2" "http://pecl.php.net/get/$1-$2.tgz" "$1-$2"
 }
 
+function get_php_crypto_extension {
+	echo -n "  crypto: downloading $EXT_CRYPTO_VERSION..."
+	git clone https://github.com/bukka/php-crypto.git "$BUILD_DIR/phpext/crypto" >> "$DIR/install.log" 2>&1
+	cd "$BUILD_DIR/phpext/crypto"
+	git checkout "$EXT_CRYPTO_VERSION" >> "$DIR/install.log" 2>&1
+	git submodule update --init --recursive >> "$DIR/install.log" 2>&1
+	cd "$BUILD_DIR"
+	echo " done!"
+}
+
 echo "[PHP] Downloading additional extensions..."
 
 if [[ "$DO_STATIC" != "yes" ]] && [[ "$COMPILE_DEBUG" == "yes" ]]; then
-	get_pecl_extension "xdebug" "$EXT_XDEBUG_VERSION"
+	get_pecl_extension "xdebug" "$EXT_XDEBUG_VERSION" &
 fi
 
 #TODO Uncomment this when it's ready for PHP7
@@ -806,41 +830,39 @@ fi
 #	HAS_PROFILER=""
 #fi
 
-get_github_extension "pthreads" "$EXT_PTHREADS_VERSION" "pmmp" "pthreads" #"v" needed for release tags because github removes the "v"
+get_github_extension "pthreads" "$EXT_PTHREADS_VERSION" "pmmp" "pthreads" & #"v" needed for release tags because github removes the "v"
 #get_pecl_extension "pthreads" "$EXT_PTHREADS_VERSION"
 
-get_github_extension "yaml" "$EXT_YAML_VERSION" "php" "pecl-file_formats-yaml"
+get_github_extension "yaml" "$EXT_YAML_VERSION" "php" "pecl-file_formats-yaml" &
 #get_pecl_extension "yaml" "$EXT_YAML_VERSION"
 
-get_github_extension "igbinary" "$EXT_IGBINARY_VERSION" "igbinary" "igbinary"
+get_github_extension "igbinary" "$EXT_IGBINARY_VERSION" "igbinary" "igbinary" &
 
-get_github_extension "ds" "$EXT_DS_VERSION" "php-ds" "ext-ds"
+get_github_extension "ds" "$EXT_DS_VERSION" "php-ds" "ext-ds" &
 
-get_github_extension "recursionguard" "$EXT_RECURSIONGUARD_VERSION" "pmmp" "ext-recursionguard"
+get_github_extension "recursionguard" "$EXT_RECURSIONGUARD_VERSION" "pmmp" "ext-recursionguard" &
 
-echo -n "  crypto: downloading $EXT_CRYPTO_VERSION..."
-git clone https://github.com/bukka/php-crypto.git "$BUILD_DIR/php/ext/crypto" >> "$DIR/install.log" 2>&1
-cd "$BUILD_DIR/php/ext/crypto"
-git checkout "$EXT_CRYPTO_VERSION" >> "$DIR/install.log" 2>&1
-git submodule update --init --recursive >> "$DIR/install.log" 2>&1
-cd "$BUILD_DIR"
-echo " done!"
+get_php_crypto_extension &
 
 if [ "$COMPILE_LEVELDB" == "yes" ]; then
 	#PHP LevelDB
-	get_github_extension "leveldb" "$EXT_LEVELDB_VERSION" "reeze" "php-leveldb"
+	get_github_extension "leveldb" "$EXT_LEVELDB_VERSION" "reeze" "php-leveldb" &
 	HAS_LEVELDB=--with-leveldb="$DIR/bin/php7"
 else
 	HAS_LEVELDB=""
 fi
 
 if [ "$COMPILE_POCKETMINE_CHUNKUTILS" == "yes" ]; then
-	get_github_extension "pocketmine-chunkutils" "$EXT_POCKETMINE_CHUNKUTILS_VERSION" "dktapps" "PocketMine-C-ChunkUtils"
+	get_github_extension "pocketmine-chunkutils" "$EXT_POCKETMINE_CHUNKUTILS_VERSION" "dktapps" "PocketMine-C-ChunkUtils" &
 	HAS_POCKETMINE_CHUNKUTILS=--enable-pocketmine-chunkutils
 else
 	HAS_POCKETMINE_CHUNKUTILS=""
 fi
 
+wait
+for i in $(ls "$BUILD_DIR/phpext"); do
+	mv "$BUILD_DIR/phpext/$i" "$BUILD_DIR/php/ext/$i"
+done
 
 echo -n "[PHP]"
 
