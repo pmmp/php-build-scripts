@@ -1,5 +1,5 @@
 #!/bin/bash
-[ -z "$PHP_VERSION" ] && PHP_VERSION="7.4.15"
+[ -z "$PHP_VERSION" ] && PHP_VERSION="8.0.2"
 
 ZLIB_VERSION="1.2.11"
 GMP_VERSION="6.2.1"
@@ -15,14 +15,14 @@ SQLITE3_YEAR="2021"
 SQLITE3_VERSION="3340100" #3.34.1
 LIBDEFLATE_VERSION="448e3f3b042219bccb0080e393ba3eb68c2091d5" #1.7
 
-EXT_PTHREADS_VERSION="5ece3055bfc637329a9d6652d24ab4ed278414a3"
+EXT_PTHREADS_VERSION="acc6e52b2144c61c434b62a3cb680d537e06828e"
 EXT_YAML_VERSION="2.2.1"
-EXT_LEVELDB_VERSION="2e3f740b55af1eb6dfc648dd451bcb7d6151c26c"
+EXT_LEVELDB_VERSION="98f2fc73d41e25ce74c59dd49c43380be1cbcf09"
 EXT_CHUNKUTILS2_VERSION="7aec31a9dfc83ddead8870dc0a29159596939680"
 EXT_XDEBUG_VERSION="3.0.2"
 EXT_IGBINARY_VERSION="3.2.1"
 EXT_DS_VERSION="4fdda13350a3b6c6e3c4de97484f68e203033fec"
-EXT_CRYPTO_VERSION="a821ab84ebea0b89b89571071aa340a137167807"
+EXT_CRYPTO_VERSION="c8867aa944fa5227eaea9d11a6ce282e64c15af9"
 EXT_RECURSIONGUARD_VERSION="0.1.0"
 EXT_LIBDEFLATE_VERSION="be5367c81c61c612271377cdae9ffacac0f6e53a"
 EXT_MORTON_VERSION="0.1.2"
@@ -805,6 +805,8 @@ get_github_extension "yaml" "$EXT_YAML_VERSION" "php" "pecl-file_formats-yaml"
 #get_pecl_extension "yaml" "$EXT_YAML_VERSION"
 
 get_github_extension "igbinary" "$EXT_IGBINARY_VERSION" "igbinary" "igbinary"
+#TODO: remove this when igbinary 3.2.2 is released
+sed -i='.bak' 's/^#if PHP_MAJOR_VERSION == 7$/#if PHP_MAJOR_VERSION == 7 || PHP_MAJOR_VERSION == 8/g' "$BUILD_DIR/php/ext/igbinary/php_igbinary.h"
 
 get_github_extension "ds" "$EXT_DS_VERSION" "php-ds" "ext-ds"
 
@@ -944,7 +946,7 @@ $HAS_DEBUG \
 --enable-shared=no \
 --enable-static=yes \
 --enable-shmop \
---enable-maintainer-zts \
+--enable-zts \
 --disable-short-tags \
 $HAVE_PCNTL \
 $HAVE_MYSQLI \
@@ -952,6 +954,7 @@ $HAVE_MYSQLI \
 --enable-cli \
 --enable-ftp \
 --enable-opcache=$HAVE_OPCACHE \
+--enable-opcache-jit=$HAVE_OPCACHE \
 --enable-igbinary \
 --enable-ds \
 --with-crypto \
@@ -1036,6 +1039,8 @@ if [ "$HAVE_OPCACHE" == "yes" ]; then
 	echo "opcache.revalidate_freq=0" >> "$DIR/bin/php7/bin/php.ini"
 	echo "opcache.file_update_protection=0" >> "$DIR/bin/php7/bin/php.ini"
 	echo "opcache.optimization_level=0x7FFEBFFF ;https://github.com/php/php-src/blob/53c1b485741f31a17b24f4db2b39afeb9f4c8aba/ext/opcache/Optimizer/zend_optimizer.h" >> "$DIR/bin/php7/bin/php.ini"
+	echo "opcache.jit=1205 ;https://www.php.net/manual/en/opcache.configuration.php#ini.opcache.jit" >> "$DIR/bin/php7/bin/php.ini"
+	echo "opcache.jit_buffer_size=128M" >> "$DIR/bin/php7/bin/php.ini"
 fi
 
 echo " done!"
